@@ -15,7 +15,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*") // Pour permettre la connexion depuis l'émulateur Android
+@CrossOrigin(origins = "*")
 public class AuthController {
 
     @Value("${spring.datasource.url}")
@@ -23,20 +23,23 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest request) {
-        // 1. On force le login en MAJUSCULES (standard Oracle)
+
+        // ✅ Validation des entrées null
+        if (request.getLogin() == null || request.getPassword() == null ||
+                request.getLogin().isBlank() || request.getPassword().isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("Login et mot de passe sont obligatoires.");
+        }
+
         String oracleUser = request.getLogin().toUpperCase().trim();
         String password = request.getPassword();
 
         System.out.println("🚀 Tentative de connexion Oracle pour : " + oracleUser);
 
-        // 2. Ouverture d'une connexion spécifique pour cet utilisateur
-        // C'est ici que l'erreur ORA-01017 sera levée si le pass est faux
         try (Connection conn = DriverManager.getConnection(dbUrl, oracleUser, password)) {
 
             System.out.println("✅ Session Oracle établie avec succès.");
 
-            // 3. Récupérer les infos de l'utilisateur depuis la table Personnel
-            // On utilise la connexion 'conn' de l'utilisateur, pas le pool admin !
             String sqlUser = "SELECT p.idpers, p.nompers, p.prenompers, po.libelle " +
                     "FROM PROJET_SGBD.Personnel p " +
                     "JOIN PROJET_SGBD.Postes po ON p.codeposte = po.codeposte " +
@@ -52,39 +55,41 @@ public class AuthController {
                     if (rs.next()) {
                         idPers = rs.getInt("idpers");
                         nomComplet = rs.getString("prenompers") + " " + rs.getString("nompers");
-                        roleApp = rs.getString("libelle").toUpperCase();
+                        roleApp = rs.getString("libelle").toUpperCase().trim(); // ✅ trim() ajouté
                     } else {
-                        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Utilisateur reconnu par Oracle mais absent de la table Personnel.");
+                        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                .body("Utilisateur reconnu par Oracle mais absent de la table Personnel.");
                     }
                 }
             }
 
-            // 4. Traitement selon le rôle (Livreur vs Chef)
-            if (roleApp.contains("LIVREUR") && !roleApp.contains("CHEF")) {
-                // C'est un LIVREUR : On récupère sa tournée du jour
+            // ✅ Logique de rôle améliorée (ordre important : CHEF avant LIVREUR)
+            if (roleApp.contains("CHEF")) {
+                return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "CHEF_LIVREUR", null));
+            } else if (roleApp.contains("LIVREUR")) {
                 List<Map<String, Object>> tournee = getTourneeDuJour(conn, idPers);
                 return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "LIVREUR", tournee));
-            }
-            else if (roleApp.contains("CHEF")) {
-                // C'est un CHEF : Il a accès à tout (on peut envoyer une liste vide ou stats)
-                return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "CHEF_LIVREUR", null));
-            }
-            else {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Accès refusé : rôle non autorisé.");
+            } else {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("Accès refusé : rôle non autorisé.");
             }
 
         } catch (SQLException e) {
-            // Gestion des erreurs Oracle
-            if (e.getErrorCode() == 1017) { // ORA-01017
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Identifiants Oracle invalides (Login/Password).");
-            } else if (e.getErrorCode() == 28000) { // ORA-28000
-                return ResponseEntity.status(HttpStatus.LOCKED).body("Compte Oracle verrouillé.");
-            }
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erreur base de données : " + e.getMessage());
+            System.err.println("❌ Erreur SQL [" + e.getErrorCode() + "] : " + e.getMessage());
+
+            return switch (e.getErrorCode()) {
+                case 1017 -> ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body("Identifiants invalides.");
+                case 28000 -> ResponseEntity.status(HttpStatus.LOCKED)
+                        .body("Compte Oracle verrouillé.");
+                case 28001 -> ResponseEntity.status(HttpStatus.FORBIDDEN)  // ✅ Ajouté
+                        .body("Mot de passe expiré.");
+                default -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("Erreur base de données : " + e.getMessage());
+            };
         }
     }
 
-    // Méthode utilitaire pour charger la tournée
     private List<Map<String, Object>> getTourneeDuJour(Connection conn, int idLivreur) throws SQLException {
         String sql = "SELECT c.nocde, cl.nomclt, cl.adrclt, lc.etatliv " +
                 "FROM PROJET_SGBD.LivraisonCom lc " +

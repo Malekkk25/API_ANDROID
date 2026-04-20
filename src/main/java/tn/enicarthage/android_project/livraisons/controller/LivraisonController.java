@@ -25,35 +25,41 @@ public class LivraisonController {
      * 1. LISTE DES LIVRAISONS (Correction ORA-00942)
      */
     @GetMapping("/ma-tournee")
-    public ResponseEntity<?> getMaTournee(@RequestParam String login, @RequestParam String password) {
-        List<Map<String, Object>> livraisons = new ArrayList<>();
+    public ResponseEntity<?> getMaTournee(
+            @RequestParam String login,
+            @RequestParam String password) {
 
-        // Ajout du préfixe SCHEMA devant chaque table pour que Malek puisse les voir
-        // Requête sécurisée :
-// 1. Filtre par livreur (Login)
-// 2. Filtre par date (Uniquement aujourd'hui)
-        String sql = "SELECT lc.nocde, lc.etatliv, lc.dateliv, c.datecde, cl.nomclt, cl.prenomclt, cl.adrclt " +
+        List<Map<String, Object>> tournee = new ArrayList<>();
+
+        // Requête SQL avec les jointures vers Commandes et Clients
+        String sql = "SELECT lc.nocde, lc.etatliv, cl.nomclt, cl.prenomclt, cl.adrclt, cl.villeclt, cl.telclt " +
                 "FROM PROJET_SGBD.LivraisonCom lc " +
+                "JOIN PROJET_SGBD.Personnel p ON lc.livreur = p.idpers " +
                 "JOIN PROJET_SGBD.Commandes c ON lc.nocde = c.nocde " +
                 "JOIN PROJET_SGBD.Clients cl ON c.noclt = cl.noclt " +
-                "JOIN PROJET_SGBD.Personnel p ON lc.livreur = p.idpers " +
                 "WHERE UPPER(p.Login) = UPPER(?) " +
-                "AND TRUNC(lc.dateliv) = TRUNC(SYSDATE)"; // <--- C'est ici la sécurité temporelle// J'ai enlevé le filtre TRUNC(date) pour tes tests
+                "AND TRUNC(lc.dateliv) = TRUNC(SYSDATE)";
 
         try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, login);
+
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Map<String, Object> item = new HashMap<>();
-                    item.put("noCde", rs.getInt("nocde"));
-                    item.put("etatLiv", rs.getString("etatliv"));
-                    item.put("client", rs.getString("prenomclt") + " " + rs.getString("nomclt"));
-                    livraisons.add(item);
+                    Map<String, Object> livraison = new HashMap<>();
+                    livraison.put("nocde", rs.getInt("nocde"));
+                    livraison.put("etatliv", rs.getString("etatliv"));
+                    livraison.put("nomClient", rs.getString("nomclt") + " " + rs.getString("prenomclt"));
+                    livraison.put("adresse", rs.getString("adrclt") + ", " + rs.getString("villeclt"));
+                    livraison.put("telephone", rs.getString("telclt"));
+
+                    tournee.add(livraison);
                 }
             }
-            return ResponseEntity.ok(livraisons);
+
+            return ResponseEntity.ok(tournee);
+
         } catch (SQLException e) {
             return ResponseEntity.status(500).body("Erreur SQL : " + e.getMessage());
         }
