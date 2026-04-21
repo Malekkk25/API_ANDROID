@@ -41,8 +41,7 @@ public class ControleurController {
             @RequestParam String login,
             @RequestParam String password) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
+
 
         try (Connection conn = dataSource.getConnection()) {
 
@@ -89,11 +88,6 @@ public class ControleurController {
             @RequestParam String password,
             @RequestParam String contenu) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
-
-        if (contenu == null || contenu.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Contenu obligatoire.");
 
         try (Connection conn = dataSource.getConnection()) {
 

@@ -40,8 +40,6 @@ public class LivreurController {
             @RequestParam String login,
             @RequestParam String password) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
 
         try (Connection conn = dataSource.getConnection()) {
 
@@ -90,8 +88,7 @@ public class LivreurController {
             @RequestParam String login,
             @RequestParam String password) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
+
 
         try (Connection conn = dataSource.getConnection()) {
 
@@ -159,8 +156,6 @@ public class LivreurController {
             @RequestParam String nouvelEtat,
             @RequestParam(required = false) String remarque) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
 
         try (Connection conn = dataSource.getConnection()) {
 
@@ -195,8 +190,6 @@ public class LivreurController {
             @RequestParam String telephone,
             @RequestParam String contenu) {
 
-        if (login == null || login.isBlank() || password == null || password.isBlank())
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Login et password obligatoires.");
 
         try (Connection conn = dataSource.getConnection()) {
 

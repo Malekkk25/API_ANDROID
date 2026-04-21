@@ -2,15 +2,13 @@ package tn.enicarthage.android_project.auth.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
 public class LoginResponse {
-    private Integer idPers;
+    private int idPers;
     private String nomComplet;
     private String role;
     private List<Map<String, Object>> tournee;
