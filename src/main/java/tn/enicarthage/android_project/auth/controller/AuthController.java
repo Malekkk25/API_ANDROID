@@ -1,12 +1,13 @@
 package tn.enicarthage.android_project.auth.controller;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tn.enicarthage.android_project.auth.dto.LoginRequest;
 import tn.enicarthage.android_project.auth.dto.LoginResponse;
 
+import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,84 +19,76 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class AuthController {
 
-    @Value("${spring.datasource.url}")
-    private String dbUrl;
+    // ✅ PostgreSQL : on utilise le DataSource Spring (1 seul user admin)
+    // L'authentification se fait EN BASE via login/password stockés dans Personnel
+    @Autowired
+    private DataSource dataSource;
 
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest request) {
 
-        // ✅ Validation des entrées null
         if (request.getLogin() == null || request.getPassword() == null ||
                 request.getLogin().isBlank() || request.getPassword().isBlank()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body("Login et mot de passe sont obligatoires.");
         }
 
-        String oracleUser = request.getLogin().toUpperCase().trim();
-        String password = request.getPassword();
+        String loginUser = request.getLogin().toLowerCase().trim(); // PostgreSQL = lowercase
+        String password  = request.getPassword();
 
-        System.out.println("🚀 Tentative de connexion Oracle pour : " + oracleUser);
+        System.out.println("🚀 Tentative de connexion PostgreSQL pour : " + loginUser);
 
-        try (Connection conn = DriverManager.getConnection(dbUrl, oracleUser, password)) {
+        // ✅ Vérification login/password dans la table Personnel
+        String sqlAuth = "SELECT p.idpers, p.nompers, p.prenompers, po.libelle " +
+                "FROM personnel p " +
+                "JOIN postes po ON p.codeposte = po.codeposte " +
+                "WHERE LOWER(p.login) = ? AND p.motp = ?";
 
-            System.out.println("✅ Session Oracle établie avec succès.");
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sqlAuth)) {
 
-            String sqlUser = "SELECT p.idpers, p.nompers, p.prenompers, po.libelle " +
-                    "FROM PROJET_SGBD.Personnel p " +
-                    "JOIN PROJET_SGBD.Postes po ON p.codeposte = po.codeposte " +
-                    "WHERE UPPER(p.Login) = ?";
+            ps.setString(1, loginUser);
+            ps.setString(2, password);
 
-            int idPers = 0;
-            String nomComplet = "";
-            String roleApp = "";
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                            .body("Identifiants invalides.");
+                }
 
-            try (PreparedStatement ps = conn.prepareStatement(sqlUser)) {
-                ps.setString(1, oracleUser);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        idPers = rs.getInt("idpers");
-                        nomComplet = rs.getString("prenompers") + " " + rs.getString("nompers");
-                        roleApp = rs.getString("libelle").toUpperCase().trim(); // ✅ trim() ajouté
-                    } else {
-                        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                                .body("Utilisateur reconnu par Oracle mais absent de la table Personnel.");
-                    }
+                int    idPers     = rs.getInt("idpers");
+                String nomComplet = rs.getString("prenompers") + " " + rs.getString("nompers");
+                String roleApp    = rs.getString("libelle").toUpperCase().trim();
+
+                System.out.println("✅ Connexion réussie pour : " + loginUser + " | Rôle : " + roleApp);
+
+                // ✅ Logique de rôle (CHEF avant LIVREUR)
+                if (roleApp.contains("CHEF")) {
+                    return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "CHEF_LIVREUR", null));
+                } else if (roleApp.contains("LIVREUR")) {
+                    List<Map<String, Object>> tournee = getTourneeDuJour(conn, idPers);
+                    return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "LIVREUR", tournee));
+                } else {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body("Accès refusé : rôle non autorisé.");
                 }
             }
 
-            // ✅ Logique de rôle améliorée (ordre important : CHEF avant LIVREUR)
-            if (roleApp.contains("CHEF")) {
-                return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "CHEF_LIVREUR", null));
-            } else if (roleApp.contains("LIVREUR")) {
-                List<Map<String, Object>> tournee = getTourneeDuJour(conn, idPers);
-                return ResponseEntity.ok(new LoginResponse(idPers, nomComplet, "LIVREUR", tournee));
-            } else {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("Accès refusé : rôle non autorisé.");
-            }
-
         } catch (SQLException e) {
-            System.err.println("❌ Erreur SQL [" + e.getErrorCode() + "] : " + e.getMessage());
-
-            return switch (e.getErrorCode()) {
-                case 1017 -> ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body("Identifiants invalides.");
-                case 28000 -> ResponseEntity.status(HttpStatus.LOCKED)
-                        .body("Compte Oracle verrouillé.");
-                case 28001 -> ResponseEntity.status(HttpStatus.FORBIDDEN)  // ✅ Ajouté
-                        .body("Mot de passe expiré.");
-                default -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                        .body("Erreur base de données : " + e.getMessage());
-            };
+            System.err.println("❌ Erreur SQL : " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Erreur base de données : " + e.getMessage());
         }
     }
 
+    // ✅ PostgreSQL : CURRENT_DATE remplace TRUNC(SYSDATE)
     private List<Map<String, Object>> getTourneeDuJour(Connection conn, int idLivreur) throws SQLException {
         String sql = "SELECT c.nocde, cl.nomclt, cl.adrclt, lc.etatliv " +
-                "FROM PROJET_SGBD.LivraisonCom lc " +
-                "JOIN PROJET_SGBD.Commandes c ON lc.nocde = c.nocde " +
-                "JOIN PROJET_SGBD.Clients cl ON c.noclt = cl.noclt " +
-                "WHERE lc.livreur = ? AND TRUNC(lc.dateliv) = TRUNC(SYSDATE)";
+                "FROM livraisoncom lc " +
+                "JOIN commandes c  ON lc.nocde = c.nocde " +
+                "JOIN clients   cl ON c.noclt  = cl.noclt " +
+                "WHERE lc.livreur = ? " +
+                "AND DATE_TRUNC('day', lc.dateliv) = CURRENT_DATE";
 
         List<Map<String, Object>> liste = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -103,10 +96,10 @@ public class AuthController {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     Map<String, Object> row = new HashMap<>();
-                    row.put("id", rs.getInt("nocde"));
-                    row.put("client", rs.getString("nomclt"));
+                    row.put("id",      rs.getInt("nocde"));
+                    row.put("client",  rs.getString("nomclt"));
                     row.put("adresse", rs.getString("adrclt"));
-                    row.put("etat", rs.getString("etatliv"));
+                    row.put("etat",    rs.getString("etatliv"));
                     liste.add(row);
                 }
             }
