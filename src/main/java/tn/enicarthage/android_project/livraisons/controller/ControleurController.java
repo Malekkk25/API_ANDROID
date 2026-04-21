@@ -18,7 +18,43 @@ public class ControleurController {
     @Value("${spring.datasource.url}")
     private String dbUrl;
     private final String SCHEMA = "PROJET_SGBD.";
+    // 1. RÉCUPÉRATION DE TOUTES LES LIVRAISONS (Filtrage côté Android)
+    @GetMapping("/livraisons")
+    public ResponseEntity<?> getToutesLivraisons(@RequestParam String login, @RequestParam String password) {
+        List<Map<String, Object>> resultats = new ArrayList<>();
 
+        String sql = "SELECT lc.nocde, lc.dateliv, lc.etatliv, " +
+                "p.nompers, p.prenompers, " +
+                "cl.nomclt, cl.prenomclt, cl.adrclt, cl.villeclt, " +
+                "NVL((SELECT SUM(li.qtecde * a.prix) " +
+                "     FROM " + SCHEMA + "ligcdes li " +
+                "     JOIN " + SCHEMA + "articles a ON li.refart = a.refart " +
+                "     WHERE li.nocde = c.nocde), 0) AS montant " +
+                "FROM " + SCHEMA + "LivraisonCom lc " +
+                "JOIN " + SCHEMA + "Personnel p ON lc.livreur = p.idpers " +
+                "JOIN " + SCHEMA + "Commandes c ON lc.nocde = c.nocde " +
+                "JOIN " + SCHEMA + "Clients cl ON c.noclt = cl.noclt";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                Map<String, Object> row = new HashMap<>();
+                row.put("nocde", rs.getInt("nocde"));
+                row.put("date", rs.getDate("dateliv"));
+                row.put("etat", rs.getString("etatliv"));
+                row.put("livreur", rs.getString("prenompers") + " " + rs.getString("nompers"));
+                row.put("client", rs.getString("nomclt") + " " + rs.getString("prenomclt"));
+                row.put("adresse", rs.getString("adrclt") + ", " + rs.getString("villeclt"));
+                row.put("montant", rs.getDouble("montant"));
+                resultats.add(row);
+            }
+            return ResponseEntity.ok(resultats);
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Erreur SQL : " + e.getMessage());
+        }
+    }
     // 1. RECHERCHE DE LIVRAISONS (Par date ou Livreur)
     @GetMapping("/recherche")
     public ResponseEntity<?> chercherLivraisons(@RequestParam String login, @RequestParam String password,
