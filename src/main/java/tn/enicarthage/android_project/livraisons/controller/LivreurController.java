@@ -25,35 +25,36 @@ public class LivreurController {
         List<Map<String, Object>> tournee = new ArrayList<>();
 
         String sql = """
-        SELECT
-            lc.nocde,
-            lc.etatliv,
-            lc.modepay,
-            cl.nomclt,
-            cl.prenomclt,
-            cl.adrclt,
-            cl.villeclt,
-            cl.telclt,
-            NVL((
-                SELECT SUM(l.qtecde * a.prix)
-                FROM PROJET_SGBD.LigCdes l
-                JOIN PROJET_SGBD.Articles a ON a.refart = l.refart
-                WHERE l.nocde = lc.nocde
-            ), 0) AS montantTotal,
-            NVL((
-                SELECT COUNT(*)
-                FROM PROJET_SGBD.LigCdes l2
-                WHERE l2.nocde = lc.nocde
-            ), 0) AS nbArticles
-        FROM PROJET_SGBD.LivraisonCom lc
-        JOIN PROJET_SGBD.Personnel p ON lc.livreur = p.idpers
-        JOIN PROJET_SGBD.Commandes c ON lc.nocde = c.nocde
-        JOIN PROJET_SGBD.Clients cl ON c.noclt = cl.noclt
-        WHERE UPPER(p.Login) = UPPER(?)
-        ORDER BY lc.nocde
-        """;
+SELECT
+    lc.nocde,
+    lc.etatliv,
+    lc.modepay,
+    cl.nomclt,
+    cl.prenomclt,
+    cl.adrclt,
+    cl.villeclt,
+    cl.telclt,
+    NVL((
+        SELECT SUM(l.qtecde * a.prix)
+        FROM PROJET_SGBD.LigCdes l
+        JOIN PROJET_SGBD.Articles a ON a.refart = l.refart
+        WHERE l.nocde = lc.nocde
+    ), 0) AS montantTotal,
+    NVL((
+        SELECT SUM(l2.qtecde)   -- Quantité TOTALE d'articles
+        FROM PROJET_SGBD.LigCdes l2
+        WHERE l2.nocde = lc.nocde
+    ), 0) AS nbArticles
+FROM PROJET_SGBD.LivraisonCom lc
+JOIN PROJET_SGBD.Personnel p ON lc.livreur = p.idpers
+JOIN PROJET_SGBD.Commandes c ON lc.nocde = c.nocde
+JOIN PROJET_SGBD.Clients cl ON c.noclt = cl.noclt
+WHERE UPPER(p.Login) = UPPER(?)
+  AND TRUNC(lc.dateliv) = TRUNC(SYSDATE)
+ORDER BY lc.nocde ASC
+""";
 
-        try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
+        try (Connection conn = DriverManager.getConnection(dbUrl, login.toUpperCase(), password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, login);
@@ -68,57 +69,13 @@ public class LivreurController {
                     livraison.put("telephone", rs.getString("telclt"));
                     livraison.put("modePayment", rs.getString("modepay"));
                     livraison.put("montantTotal", rs.getDouble("montantTotal"));
-                    livraison.put("nbArticles", rs.getInt("nbArticles"));
+                    livraison.put("nbArticles", rs.getInt("nbArticles")); // 👈 désormais la quantité totale
                     tournee.add(livraison);
                 }
             }
-
             return ResponseEntity.ok(tournee);
         } catch (SQLException e) {
-            return ResponseEntity.status(500).body("Erreur SQL : " + e.getMessage());
-        }
-    }
-
-    // 2. DÉTAILS DE LA LIVRAISON
-    @GetMapping("/details-commande/{noCde}")
-    public ResponseEntity<?> getDetails(@PathVariable int noCde, @RequestParam String login, @RequestParam String password) {
-        Map<String, Object> response = new HashMap<>();
-        List<Map<String, Object>> articles = new ArrayList<>();
-        double montantTotal = 0.0;
-
-        String sql = "SELECT cl.nomclt, cl.telclt, cl.adrclt, cl.villeclt, lc.modepay, " +
-                "a.designation, l.qtecde, a.prix, (l.qtecde * a.prix) as sous_total " +
-                "FROM " + SCHEMA + "ligcdes l " +
-                "JOIN " + SCHEMA + "articles a ON l.refart = a.refart " +
-                "JOIN " + SCHEMA + "commandes c ON l.nocde = c.nocde " +
-                "JOIN " + SCHEMA + "clients cl ON c.noclt = cl.noclt " +
-                "JOIN " + SCHEMA + "LivraisonCom lc ON c.nocde = lc.nocde " +
-                "WHERE l.nocde = ?";
-
-        try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, noCde);
-            try (ResultSet rs = ps.executeQuery()) {
-                boolean infosSet = false;
-                while (rs.next()) {
-                    if (!infosSet) {
-                        response.put("nomClient", rs.getString("nomclt"));
-                        response.put("telephone", rs.getString("telclt"));
-                        response.put("adresseComplete", rs.getString("adrclt") + ", " + rs.getString("villeclt"));
-                        response.put("modePayement", rs.getString("modepay"));
-                        infosSet = true;
-                    }
-                    Map<String, Object> art = new HashMap<>();
-                    art.put("designation", rs.getString("designation"));
-                    art.put("quantite", rs.getInt("qtecde"));
-                    articles.add(art);
-                    montantTotal += rs.getDouble("sous_total");
-                }
-            }
-            response.put("articles", articles);
-            response.put("montantTotal", montantTotal);
-            return ResponseEntity.ok(response);
-        } catch (SQLException e) {
+            System.err.println("Erreur SQL: " + e.getMessage());
             return ResponseEntity.status(500).body("Erreur SQL : " + e.getMessage());
         }
     }

@@ -1,4 +1,4 @@
-package tn.enicarthage.android_project.livraison.controller;
+package tn.enicarthage.android_project.livraisons.controller;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -33,7 +33,8 @@ public class ControleurController {
                 "FROM " + SCHEMA + "LivraisonCom lc " +
                 "JOIN " + SCHEMA + "Personnel p ON lc.livreur = p.idpers " +
                 "JOIN " + SCHEMA + "Commandes c ON lc.nocde = c.nocde " +
-                "JOIN " + SCHEMA + "Clients cl ON c.noclt = cl.noclt";
+                "JOIN " + SCHEMA + "Clients cl ON c.noclt = cl.noclt " +
+                "ORDER BY lc.nocde DESC";
 
         try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -49,48 +50,6 @@ public class ControleurController {
                 row.put("adresse", rs.getString("adrclt") + ", " + rs.getString("villeclt"));
                 row.put("montant", rs.getDouble("montant"));
                 resultats.add(row);
-            }
-            return ResponseEntity.ok(resultats);
-        } catch (SQLException e) {
-            return ResponseEntity.status(500).body("Erreur SQL : " + e.getMessage());
-        }
-    }
-    // 1. RECHERCHE DE LIVRAISONS (Par date ou Livreur)
-    @GetMapping("/recherche")
-    public ResponseEntity<?> chercherLivraisons(@RequestParam String login, @RequestParam String password,
-                                                @RequestParam(required = false) String dateFiltre,
-                                                @RequestParam(required = false) String nomLivreur) {
-        List<Map<String, Object>> resultats = new ArrayList<>();
-
-        // On construit la requête dynamiquement selon les filtres
-        StringBuilder sql = new StringBuilder(
-                "SELECT lc.nocde, lc.dateliv, lc.etatliv, p.nompers, cl.nomclt " +
-                        "FROM " + SCHEMA + "LivraisonCom lc " +
-                        "JOIN " + SCHEMA + "Personnel p ON lc.livreur = p.idpers " +
-                        "JOIN " + SCHEMA + "Commandes c ON lc.nocde = c.nocde " +
-                        "JOIN " + SCHEMA + "Clients cl ON c.noclt = cl.noclt WHERE 1=1 "
-        );
-
-        if (dateFiltre != null) sql.append(" AND TRUNC(lc.dateliv) = TO_DATE(?, 'YYYY-MM-DD')");
-        if (nomLivreur != null) sql.append(" AND UPPER(p.nompers) LIKE UPPER(?)");
-
-        try (Connection conn = DriverManager.getConnection(dbUrl, login, password);
-             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
-
-            int paramIndex = 1;
-            if (dateFiltre != null) ps.setString(paramIndex++, dateFiltre);
-            if (nomLivreur != null) ps.setString(paramIndex++, "%" + nomLivreur + "%");
-
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    Map<String, Object> row = new HashMap<>();
-                    row.put("nocde", rs.getInt("nocde"));
-                    row.put("date", rs.getDate("dateliv"));
-                    row.put("etat", rs.getString("etatliv"));
-                    row.put("livreur", rs.getString("nompers"));
-                    row.put("client", rs.getString("nomclt"));
-                    resultats.add(row);
-                }
             }
             return ResponseEntity.ok(resultats);
         } catch (SQLException e) {
